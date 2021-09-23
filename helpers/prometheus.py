@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime, timedelta
 from uuid import uuid4
+from os import getenv
+
 
 from prometheus_client.core import (
     REGISTRY,
@@ -12,11 +14,11 @@ from prometheus_client.core import (
 from helpers.utils import get_cached, write_cache
 
 # constants for caching file
+CACHING_MINUTES = int(getenv("PROJECT_CACHE_EXPIRATION", "10"))
 JSON_CACHE_FILE = "/tmp/sentry-prometheus-exporter-cache.json"
-DEFAULT_CACHE_EXPIRE_TIMESTAMP = int(datetime.timestamp(datetime.now() + timedelta(minutes=2)))
+DEFAULT_CACHE_EXPIRE_TIMESTAMP = int(datetime.timestamp(datetime.now() + timedelta(minutes=CACHING_MINUTES)))
 
 log = logging.getLogger(__name__)
-
 
 def clean_registry():
     # Loop with try except to remove all default collectors
@@ -59,6 +61,8 @@ class SentryCollector(object):
         self.get_1h_metrics = metric_scraping_config[2]
         self.get_24h_metrics = metric_scraping_config[3]
         self.get_14d_metrics = metric_scraping_config[4]
+        self.cached_data = False
+        self.cache_expiration = False
 
     def __build_sentry_data_from_api(self):
         """Build a local data structure from sentry API calls.
@@ -193,22 +197,22 @@ class SentryCollector(object):
 
             data["projects_data"] = projects_issue_data
 
-        write_cache(JSON_CACHE_FILE, data, DEFAULT_CACHE_EXPIRE_TIMESTAMP)
-        log.debug("cache: writing data structure to file: {cache}".format(cache=JSON_CACHE_FILE))
+        self.cached_data = data
+        self.cache_expiration = DEFAULT_CACHE_EXPIRE_TIMESTAMP
+        log.debug("cache: writing data structure to memory")
         return data
 
     def __build_sentry_data(self):
 
-        data = get_cached(JSON_CACHE_FILE)
+        log.debug(f"cache expiration: {self.cache_expiration}. now: {int(datetime.timestamp(datetime.now()))}")
 
-        if data is False:
-            log.debug("cache: {cache} not found.".format(cache=JSON_CACHE_FILE))
-            log.debug("cache: rebuilding from API...")
-            api_data = self.__build_sentry_data_from_api()
-            return api_data
+        if self.cached_data and self.cache_expiration > int(datetime.timestamp(datetime.now())):
+            return self.cached_data
 
-        log.debug("cache: reading data structure from file: {cache}".format(cache=JSON_CACHE_FILE))
-        return data
+        log.warning("cache: not found.")
+        log.warning("cache: rebuilding from API...")
+        api_data = self.__build_sentry_data_from_api()
+        return api_data
 
     def collect(self):
         """Yields metrics from the collectors in the registry."""
