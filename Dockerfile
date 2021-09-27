@@ -8,7 +8,7 @@ COPY helpers/ /app/helpers/
 COPY libs/ /app/libs/
 COPY exporter.py requirements.txt /app/
 
-RUN pip install -r requirements.txt
+RUN pip install -r requirements.txt && apt update -y && apt-get install -y netcat wget
 
 USER nobody
 
